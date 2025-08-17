@@ -1,0 +1,12 @@
+.ai-comment-btn {
+  background-color: #0a66c2;
+  color: white;
+  border: none;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ai-comment-btn:hover {
+  background-color: #004182;
+}
