@@ -1,16 +1,38 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import google.generativeai as genai
+from anthropic import Anthropic
 from dotenv import load_dotenv
 import os
+import json
+import uuid
+from datetime import datetime
 
 load_dotenv()
-api_key = os.getenv("GOOGLE_GEMINI_API_KEY")
+api_key = os.getenv("CLAUDE_API_KEY")
 
-genai.configure(api_key=api_key)
+client = Anthropic(api_key=api_key)
 
 app = Flask(__name__)
 CORS(app)
+
+COMMENTS_FILE = 'comments_training_data.json'
+
+def load_comments_data():
+    try:
+        with open(COMMENTS_FILE, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"training_data": []}
+
+def save_comments_data(data):
+    with open(COMMENTS_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+def extract_topic_keywords(post_text):
+    words = post_text.lower().split()
+    keywords = [word for word in words if len(word) > 4]
+    return keywords[:5]
+
 
 @app.route('/generate', methods=['POST'])
 def generate():
@@ -61,10 +83,69 @@ def generate():
     Here is the LinkedIn Post Content: "{post_text}"
     """
 
-    model = genai.GenerativeModel("models/gemini-1.5-flash")
-    response = model.generate_content(prompt)
+    try:
+        response = client.messages.create(
+            model="claude-3-5-sonnet-20241022",
+            max_tokens=1024,
+            messages=[
+                {"role": "user", "content": prompt}
+            ]
+        )
+        return jsonify({"comment": response.content[0].text.strip()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
-    return jsonify({"comment": response.text.strip()})
+@app.route('/store', methods=['POST'])
+def store_comment():
+    data = request.json
+    
+    original_post = data.get('original_post', '')
+    generated_comment = data.get('generated_comment', '')
+    final_comment = data.get('final_comment', '')
+    post_author = data.get('post_author', '')
+    your_relationship = data.get('your_relationship', '')
+    
+    modifications = ""
+    if generated_comment != final_comment:
+        modifications = f"Changed from: '{generated_comment}' to: '{final_comment}'"
+    
+    comment_data = {
+        "id": str(uuid.uuid4()),
+        "original_post": original_post,
+        "generated_comment": generated_comment,
+        "final_comment": final_comment,
+        "modifications": modifications,
+        "post_topic": extract_topic_keywords(original_post),
+        "engagement": {"likes": 0, "replies": 0},
+        "timestamp": datetime.now().isoformat(),
+        "post_author": post_author,
+        "your_relationship": your_relationship
+    }
+    
+    comments_data = load_comments_data()
+    comments_data["training_data"].append(comment_data)
+    save_comments_data(comments_data)
+    
+    return jsonify({"success": True, "stored_id": comment_data["id"]})
+
+
+@app.route('/export', methods=['GET'])
+def export_training_data():
+    comments_data = load_comments_data()
+    
+    training_format = []
+    for item in comments_data["training_data"]:
+        training_format.append({
+            "input": f"Post: {item['original_post']}\nGenerated: {item['generated_comment']}",
+            "output": item['final_comment'],
+            "metadata": {
+                "topic": item['post_topic'],
+                "modifications": item['modifications'],
+                "timestamp": item['timestamp']
+            }
+        })
+    
+    return jsonify({"training_data": training_format, "total_samples": len(training_format)})
 
 if __name__ == "__main__":
-    app.run(port=5000)
+    app.run(port=5001)
