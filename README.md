@@ -12,3 +12,4 @@ Steps
 
 for debugging:
 1. check console log in chrome 
+2. check the backend dev server for flask debugging
